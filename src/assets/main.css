@@ -1,0 +1,26 @@
+@import "tailwindcss";
+
+@plugin "daisyui" {
+  themes: light --default;
+}
+
+@plugin "daisyui/theme" {
+  name: "light";
+  default: true;
+}
+
+/* Custom styles */
+@layer base {
+  body {
+    margin: 0;
+    padding: 0;
+  }
+}
+
+@layer components {
+  #app {
+    min-height: 100vh;
+  }
+}
+
+
