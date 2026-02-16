@@ -10,7 +10,23 @@
       </button>
     </div>
 
-    <div v-if="video" class="max-w-5xl mx-auto">
+    <!-- Loading State -->
+    <div v-if="loading" class="flex flex-col items-center justify-center min-h-[400px]">
+      <span class="loading loading-spinner loading-lg text-primary"></span>
+      <p class="mt-4 text-base-content/70">Loading video details...</p>
+    </div>
+
+    <!-- Error State -->
+    <div v-else-if="error" class="alert alert-error shadow-lg max-w-2xl mx-auto">
+      <svg xmlns="http://www.w3.org/2000/svg" class="stroke-current shrink-0 h-6 w-6" fill="none" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+          d="M10 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2m7-2a9 9 0 11-18 0 9 9 0 0118 0z" />
+      </svg>
+      <span>{{ error }}</span>
+      <button @click="goBack" class="btn btn-sm btn-ghost">Go Back</button>
+    </div>
+
+    <div v-else-if="video" class="max-w-5xl mx-auto animate-in fade-in duration-500">
       <!-- Video Player -->
       <div class="card bg-base-100 shadow-2xl mb-6">
         <figure class="bg-black">
@@ -20,7 +36,7 @@
             controls
             :poster="video.thumbnail"
           >
-            <source :src="video.videoUrl" type="video/mp4">
+            <source :src="video.video_url" type="video/mp4">
             Your browser does not support the video tag.
           </video>
         </figure>
@@ -63,7 +79,7 @@
                 </svg>
                 <div>
                   <p class="text-sm text-base-content/70">File Size</p>
-                  <p class="font-semibold">{{ video.fileSize }}</p>
+                  <p class="font-semibold">{{ formatFileSize(video.fileSize || video.size || video.file_size) }}</p>
                 </div>
               </div>
 
@@ -95,7 +111,7 @@
                 </svg>
                 <div>
                   <p class="text-sm text-base-content/70">Upload Date</p>
-                  <p class="font-semibold">{{ video.uploadDate }}</p>
+                  <p class="font-semibold">{{ formatDate(video.created_at) }}</p>
                 </div>
               </div>
 
@@ -140,11 +156,13 @@
         <p class="py-4">Are you sure you want to delete "{{ video?.title }}"? This action cannot be undone.</p>
         <div class="modal-action">
           <button @click="showDeleteModal = false" class="btn btn-ghost">Cancel</button>
-          <button @click="deleteVideo" class="btn btn-error">
-            <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <button @click="deleteVideo" class="btn btn-error" :disabled="isDeleting">
+            <span v-if="isDeleting" class="loading loading-spinner loading-xs"></span>
+            <svg v-else xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 mr-2" fill="none" viewBox="0 0 24 24"
+              stroke="currentColor">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
             </svg>
-            Delete
+            {{ isDeleting ? 'Deleting...' : 'Delete' }}
           </button>
         </div>
       </div>
@@ -158,66 +176,35 @@
 <script setup>
 import { ref, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
+import api from '@/services/api'
+import { formatFileSize, formatDate } from '@/utils/formatters'
 
 const route = useRoute()
 const router = useRouter()
 const videoPlayer = ref(null)
 const showDeleteModal = ref(false)
-
-// Sample video data (in a real app, this would come from an API)
 const video = ref(null)
+const loading = ref(true)
+const error = ref(null)
+const isDeleting = ref(false)
 
-const videoData = {
-  1: {
-    id: 1,
-    title: 'Product Demo Video',
-    thumbnail: 'https://images.unsplash.com/photo-1492619375914-88005aa9e8fb?w=800&h=600&fit=crop',
-    videoUrl: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4',
-    fileSize: '245 MB',
-    duration: '5:32',
-    status: 'completed',
-    isNew: true,
-    format: 'MP4',
-    uploadDate: 'Feb 15, 2026',
-    views: '1,234',
-    resolution: '1920x1080',
-    description: 'This is a comprehensive product demonstration showcasing all the key features and benefits of our latest offering. Perfect for sales presentations and customer onboarding.'
-  },
-  2: {
-    id: 2,
-    title: 'Team Meeting Recording',
-    thumbnail: 'https://images.unsplash.com/photo-1611162617474-5b21e879e113?w=800&h=600&fit=crop',
-    videoUrl: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ElephantsDream.mp4',
-    fileSize: '512 MB',
-    duration: '12:45',
-    status: 'completed',
-    isNew: false,
-    format: 'MP4',
-    uploadDate: 'Feb 10, 2026',
-    views: '856',
-    resolution: '1920x1080',
-    description: 'Weekly team sync meeting covering project updates, roadmap planning, and Q&A session.'
-  },
-  3: {
-    id: 3,
-    title: 'Tutorial Series - Part 1',
-    thumbnail: 'https://images.unsplash.com/photo-1516321497487-e288fb19713f?w=800&h=600&fit=crop',
-    videoUrl: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4',
-    fileSize: '189 MB',
-    duration: '8:15',
-    status: 'processing',
-    isNew: false,
-    format: 'MP4',
-    uploadDate: 'Feb 14, 2026',
-    views: '2,145',
-    resolution: '1280x720',
-    description: 'First episode in our comprehensive tutorial series for beginners.'
+const fetchVideo = async () => {
+  loading.value = true
+  error.value = null
+  try {
+    const videoId = route.params.id
+    const response = await api.get(`/videos/${videoId}`)
+    video.value = response.data.data || response.data
+  } catch (err) {
+    console.error('Error fetching video:', err)
+    error.value = 'Failed to load video details. It might have been deleted or is currently unavailable.'
+  } finally {
+    loading.value = false
   }
 }
 
 onMounted(() => {
-  const videoId = parseInt(route.params.id)
-  video.value = videoData[videoId] || videoData[1]
+  fetchVideo()
 })
 
 const getBadgeClass = (status) => {
@@ -237,11 +224,19 @@ const goBack = () => {
   router.push('/videos')
 }
 
-const deleteVideo = () => {
-  showDeleteModal.value = false
-  // In a real app, you would make an API call here
-  setTimeout(() => {
+const deleteVideo = async () => {
+  if (!video.value) return
+
+  isDeleting.value = true
+  try {
+    await api.delete(`/videos/${video.value.id}`)
+    showDeleteModal.value = false
     router.push('/videos')
-  }, 500)
+  } catch (err) {
+    console.error('Error deleting video:', err)
+    alert('Failed to delete video. Please try again.')
+  } finally {
+    isDeleting.value = false
+  }
 }
 </script>

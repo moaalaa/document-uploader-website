@@ -93,12 +93,15 @@
 <script setup>
 import { ref } from 'vue'
 import { useRouter } from 'vue-router'
+import api from '@/services/api'
+import { formatFileSize } from '@/utils/formatters'
 
 const router = useRouter()
 const selectedFile = ref(null)
 const isUploading = ref(false)
 const uploadProgress = ref(0)
-const uploadStatus = ref(null) // 'uploading', 'processing', 'completed'
+const uploadStatus = ref(null) // 'uploading', 'processing', 'completed', 'error'
+const errorMessage = ref('')
 
 const handleFileSelect = (event) => {
   const file = event.target.files[0]
@@ -106,44 +109,79 @@ const handleFileSelect = (event) => {
     selectedFile.value = file
     uploadProgress.value = 0
     uploadStatus.value = null
+    errorMessage.value = ''
   }
 }
 
-const formatFileSize = (bytes) => {
-  if (bytes === 0) return '0 Bytes'
-  const k = 1024
-  const sizes = ['Bytes', 'KB', 'MB', 'GB']
-  const i = Math.floor(Math.log(bytes) / Math.log(k))
-  return Math.round(bytes / Math.pow(k, i) * 100) / 100 + ' ' + sizes[i]
+const getVideoMetadata = (file) => {
+  return new Promise((resolve) => {
+    const video = document.createElement('video')
+    video.preload = 'metadata'
+    video.onloadedmetadata = () => {
+      window.URL.revokeObjectURL(video.src)
+      const duration = Math.round(video.duration)
+      const minutes = Math.floor(duration / 60)
+      const seconds = duration % 60
+      const formattedDuration = `${minutes}:${seconds.toString().padStart(2, '0')}`
+
+      resolve({
+        duration: formattedDuration,
+        width: video.videoWidth,
+        height: video.videoHeight,
+        resolution: `${video.videoWidth}x${video.videoHeight}`
+      })
+    }
+    video.src = URL.createObjectURL(file)
+  })
 }
 
-const startUpload = () => {
+const startUpload = async () => {
   if (!selectedFile.value) return
   
   isUploading.value = true
   uploadStatus.value = 'uploading'
   uploadProgress.value = 0
+  errorMessage.value = ''
 
-  // Simulate upload progress
-  const interval = setInterval(() => {
-    uploadProgress.value += 10
-    
-    if (uploadProgress.value >= 100) {
-      clearInterval(interval)
-      uploadStatus.value = 'processing'
-      
-      // Simulate processing
-      setTimeout(() => {
-        uploadStatus.value = 'completed'
-        isUploading.value = false
-        
-        // Redirect to My Videos after 2 seconds
-        setTimeout(() => {
-          router.push('/videos')
-        }, 2000)
-      }, 2000)
-    }
-  }, 300)
+  try {
+    // Extract metadata
+    const metadata = await getVideoMetadata(selectedFile.value)
+
+    const formData = new FormData()
+    formData.append('video', selectedFile.value)
+    formData.append('title', selectedFile.value.name.split('.').slice(0, -1).join('.'))
+    formData.append('file_size', selectedFile.value.size) // raw bytes
+    formData.append('duration', metadata.duration)
+    formData.append('resolution', metadata.resolution)
+    formData.append('format', selectedFile.value.type.split('/')[1]?.toUpperCase() || 'MP4')
+
+    const response = await api.post('/videos', formData, {
+      headers: {
+        'Content-Type': 'multipart/form-data'
+      },
+      onUploadProgress: (progressEvent) => {
+        const percentCompleted = Math.round((progressEvent.loaded * 100) / progressEvent.total)
+        uploadProgress.value = percentCompleted
+
+        if (percentCompleted === 100) {
+          uploadStatus.value = 'processing'
+        }
+      }
+    })
+
+    uploadStatus.value = 'completed'
+    isUploading.value = false
+
+    // Redirect to My Videos after 2 seconds
+    setTimeout(() => {
+      router.push('/videos')
+    }, 2000)
+  } catch (err) {
+    console.error('Upload failed:', err)
+    uploadStatus.value = 'error'
+    isUploading.value = false
+    errorMessage.value = err.response?.data?.message || 'Failed to upload video. Please check your connection and try again.'
+  }
 }
 
 const cancelUpload = () => {
@@ -151,6 +189,7 @@ const cancelUpload = () => {
   isUploading.value = false
   uploadProgress.value = 0
   uploadStatus.value = null
+  errorMessage.value = ''
 }
 
 const getAlertClass = () => {
@@ -161,6 +200,8 @@ const getAlertClass = () => {
       return 'alert-warning'
     case 'completed':
       return 'alert-success'
+    case 'error':
+      return 'alert-error'
     default:
       return ''
   }
@@ -174,6 +215,8 @@ const getStatusMessage = () => {
       return 'Processing video...'
     case 'completed':
       return 'Upload completed! Redirecting to My Videos...'
+    case 'error':
+      return errorMessage.value
     default:
       return ''
   }
